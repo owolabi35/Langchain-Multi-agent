@@ -10,7 +10,7 @@ tavily-python>=0.3.0
 
 # Web scraping
 beautifulsoup4>=4.12.0
-readability-lxml 
+readability-lxml>=0.8.1
 trafilatura
 requests>=2.31.0
 lxml>=5.0.0
