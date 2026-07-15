@@ -1,35 +1,45 @@
-from langchain.tools import tool 
+from langchain.tools import tool
 import requests
 from dotenv import load_dotenv
 import os
 from tavily import TavilyClient
 from rich import print
 from bs4 import BeautifulSoup
-from readability import Document
-import trafilatura
-import re 
+import re
+
+from src.tools.ssl_utils import configure_ssl_certificates
+
+try:
+    from readability import Document
+except ImportError:
+    Document = None
+
+try:
+    import trafilatura
+except ImportError:
+    trafilatura = None
 
 
 load_dotenv()
 
+CA_BUNDLE = configure_ssl_certificates()
 tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
+
 @tool
-def web_search(query : str) -> str:
-    """Search the web for recent and reliable information on a topic . Returns Titles , URLs and snippets."""
-    results = tavily.search(query=query,max_results=5)
+def web_search(query: str) -> str:
+    """Search the web for recent and reliable information on a topic. Returns titles, URLs, and snippets."""
+    results = tavily.search(query=query, max_results=5)
 
     out = []
 
-    for r in results['results']:
+    for r in results["results"]:
         out.append(
             f"Title: {r['title']}\nURL: {r['url']}\nSnippet: {r['content'][:300]}\n"
         )
-    
+
     return "\n----\n".join(out)
 
-   
-    
 
 @tool
 def scrape_url(url: str) -> str:
@@ -49,58 +59,51 @@ def scrape_url(url: str) -> str:
     }
 
     try:
-        # ── Fetch page ─────────────────────────────────────
         response = requests.get(
             url,
             headers=headers,
-            timeout=15
+            timeout=15,
+            verify=CA_BUNDLE,
         )
 
         response.raise_for_status()
 
         html = response.text
 
-        # ──────────────────────────────────────────────────
-        # Strategy 1 → trafilatura (BEST for articles/blogs)
-        # ──────────────────────────────────────────────────
-        extracted = trafilatura.extract(
-            html,
-            include_comments=False,
-            include_tables=False
-        )
+        if trafilatura is not None:
+            extracted = trafilatura.extract(
+                html,
+                include_comments=False,
+                include_tables=False,
+            )
 
-        if extracted and len(extracted.strip()) > 200:
-            cleaned = re.sub(r'\s+', ' ', extracted)
-            return cleaned[:5000]
+            if extracted and len(extracted.strip()) > 200:
+                cleaned = re.sub(r"\s+", " ", extracted)
+                return cleaned[:5000]
 
-        # ──────────────────────────────────────────────────
-        # Strategy 2 → readability
-        # ──────────────────────────────────────────────────
-        doc = Document(html)
-        clean_html = doc.summary()
+        if Document is not None:
+            doc = Document(html)
+            clean_html = doc.summary()
 
-        soup = BeautifulSoup(clean_html, "html.parser")
+            soup = BeautifulSoup(clean_html, "html.parser")
 
-        for tag in soup([
-            "script",
-            "style",
-            "nav",
-            "footer",
-            "header",
-            "aside",
-            "form"
-        ]):
-            tag.decompose()
+            for tag in soup([
+                "script",
+                "style",
+                "nav",
+                "footer",
+                "header",
+                "aside",
+                "form",
+            ]):
+                tag.decompose()
 
-        text = soup.get_text(separator=" ", strip=True)
+            text = soup.get_text(separator=" ", strip=True)
 
-        if text and len(text.strip()) > 200:
-            cleaned = re.sub(r'\s+', ' ', text)
-            return cleaned[:5000]
+            if text and len(text.strip()) > 200:
+                cleaned = re.sub(r"\s+", " ", text)
+                return cleaned[:5000]
 
-        # ──────────────────────────────────────────────────
-        # Strategy 3 → fallback full page extraction
-        # ──────────────────────────────────────────────────
         soup = BeautifulSoup(html, "html.parser")
 
         for tag in soup([
@@ -110,13 +113,13 @@ def scrape_url(url: str) -> str:
             "footer",
             "header",
             "aside",
-            "form"
+            "form",
         ]):
             tag.decompose()
 
         text = soup.get_text(separator=" ", strip=True)
 
-        cleaned = re.sub(r'\s+', ' ', text)
+        cleaned = re.sub(r"\s+", " ", text)
 
         if cleaned:
             return cleaned[:5000]
